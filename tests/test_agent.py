@@ -1,10 +1,14 @@
 from typing import Any
-import pytest
+from unittest.mock import AsyncMock, MagicMock
+
 import httpx
+import pytest
 from uuid import uuid4
 
 from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
 from a2a.types import Message, Part, Role, TextPart
+
+from agent import Agent
 
 
 # A2A validation helpers - adapted from https://github.com/a2aproject/a2a-inspector/blob/main/backend/validators.py
@@ -196,4 +200,94 @@ async def test_message(agent, streaming):
     assert events, "Agent should respond with at least one event"
     assert not all_errors, f"Message validation failed:\n" + "\n".join(all_errors)
 
-# Add your custom tests here
+@pytest.mark.asyncio
+async def test_tau2_agent_openai_json_artifact():
+    json_out = '{"name": "respond", "arguments": {"content": "ok"}}'
+    msg_obj = MagicMock()
+    msg_obj.message.content = json_out
+    mock_response = MagicMock()
+    mock_response.choices = [msg_obj]
+
+    mock_create = AsyncMock(return_value=mock_response)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    agent = Agent(client=mock_client)
+    updater = MagicMock()
+    updater.update_status = AsyncMock()
+    updater.add_artifact = AsyncMock()
+
+    user_msg = Message(
+        kind="message",
+        role=Role.user,
+        parts=[Part(TextPart(text="Hello"))],
+        message_id="m1",
+        context_id=None,
+    )
+
+    await agent.run(user_msg, updater)
+
+    mock_create.assert_awaited_once()
+    _args, kwargs = mock_create.await_args
+    assert kwargs["temperature"] == 0
+    assert kwargs["response_format"] == {"type": "json_object"}
+    assert len(agent._messages) == 3
+
+    updater.add_artifact.assert_awaited_once()
+    call_kw = updater.add_artifact.await_args.kwargs
+    assert call_kw["name"] == "Response"
+    text = call_kw["parts"][0].root.text
+    assert text == json_out
+
+
+@pytest.mark.asyncio
+async def test_tau2_agent_accumulates_history_across_turns():
+    def make_response(content: str):
+        msg_obj = MagicMock()
+        msg_obj.message.content = content
+        resp = MagicMock()
+        resp.choices = [msg_obj]
+        return resp
+
+    mock_create = AsyncMock(
+        side_effect=[
+            make_response('{"name": "respond", "arguments": {"content": "a"}}'),
+            make_response('{"name": "respond", "arguments": {"content": "b"}}'),
+        ]
+    )
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    agent = Agent(client=mock_client)
+    updater = MagicMock()
+    updater.update_status = AsyncMock()
+    updater.add_artifact = AsyncMock()
+
+    await agent.run(
+        Message(
+            kind="message",
+            role=Role.user,
+            parts=[Part(TextPart(text="First"))],
+            message_id="m1",
+            context_id=None,
+        ),
+        updater,
+    )
+    await agent.run(
+        Message(
+            kind="message",
+            role=Role.user,
+            parts=[Part(TextPart(text="Second"))],
+            message_id="m2",
+            context_id=None,
+        ),
+        updater,
+    )
+
+    assert mock_create.await_count == 2
+    second_msgs = mock_create.await_args_list[1].kwargs["messages"]
+    assert any("First" in m.get("content", "") for m in second_msgs)
+    assert any(
+        '{"name": "respond", "arguments": {"content": "a"}}' == m.get("content", "")
+        for m in second_msgs
+    )
