@@ -15,7 +15,7 @@
     proxy: { kind: "a2a", optional: true },
   },
   program: {
-    image: "ghcr.io/rdi-foundation/tau2-agentbeats-base-purple:latest",
+    image: "ghcr.io/ShermanKsenia/agent-hw:latest",
     entrypoint: ["uv", "run", "src/server.py", "--host", "0.0.0.0", "--port", "9009"],
     env: {
       AGENT_LLM: "${config.agent_llm}",
@@ -26,7 +26,7 @@
     },
     network: {
       endpoints: [
-        { name: "endpoint", port: 9010 }
+        { name: "endpoint", port: 9009 }
       ]
     }
   },
