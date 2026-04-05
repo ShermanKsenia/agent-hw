@@ -56,7 +56,6 @@ class Executor(AgentExecutor):
                 await updater.complete()
         except Exception as e:
             print(f"Task failed with agent error: {e}")
-            raise e
             await updater.failed(new_agent_text_message(f"Agent error: {e}", context_id=context_id, task_id=task.id))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:

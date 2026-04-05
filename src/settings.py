@@ -2,7 +2,7 @@
 
 import os
 
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "qwen/qwen3.6-plus:free"
 
 
 def get_openai_api_key() -> str:
