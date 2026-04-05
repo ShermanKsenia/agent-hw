@@ -1,7 +1,6 @@
 .DS_Store
 .env
 .python-version
-tau2-agentbeats-main/
 
 # Python-generated files
 __pycache__/

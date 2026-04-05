@@ -39,9 +39,10 @@ For a concrete example of implementing an agent using this template, see this [d
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENAI_API_KEY` | yes | API key for the OpenAI SDK |
-| `OPENAI_MODEL` | no | Model id (default: `gpt-4o-mini`) |
-| `OPENAI_BASE_URL` | no | Optional alternate API base URL |
+| `AGENT_LLM` | yes | agent model name |
+| `OPENAI_API_KEY` | no | api key to openai |
+| `GEMINI_API_KEY` | no | api key to gemini |
+| `DEEPSEEK_API_KEY` | no | api key to deepseek |
 
 ## Running Locally
 
