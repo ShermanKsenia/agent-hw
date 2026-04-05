@@ -1,6 +1,6 @@
-# A2A Agent Template
+# A2A Agent Template (Tau2 purple baseline)
 
-A minimal template for building [A2A (Agent-to-Agent)](https://a2a-protocol.org/latest/) agents.
+A minimal template for building [A2A (Agent-to-Agent)](https://a2a-protocol.org/latest/) agents. This repository includes a **Tau2 / AgentBeats purple baseline**: an OpenAI chat model with **JSON** tool-or-respond replies, matching the green agent’s `RemoteA2AAgent` protocol (see [tau2-agentbeats](https://github.com/RDI-Foundation/tau2-agentbeats)).
 
 ## Project Structure
 
@@ -8,7 +8,8 @@ A minimal template for building [A2A (Agent-to-Agent)](https://a2a-protocol.org/
 src/
 ├─ server.py      # Server setup and agent card configuration
 ├─ executor.py    # A2A request handling
-├─ agent.py       # Your agent implementation goes here
+├─ agent.py       # Tau2 purple baseline (OpenAI + JSON)
+├─ settings.py    # OPENAI_* environment helpers
 └─ messenger.py   # A2A messaging utilities
 tests/
 └─ test_agent.py  # Agent tests
@@ -34,13 +35,22 @@ amber-manifest.json5  # Amber manifest
 
 For a concrete example of implementing an agent using this template, see this [draft PR](https://github.com/RDI-Foundation/agent-template/pull/8).
 
+## Configuration (OpenAI)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | yes | API key for the OpenAI SDK |
+| `OPENAI_MODEL` | no | Model id (default: `gpt-4o-mini`) |
+| `OPENAI_BASE_URL` | no | Optional alternate API base URL |
+
 ## Running Locally
 
 ```bash
 # Install dependencies
 uv sync
 
-# Run the server
+# Run the server (default http://127.0.0.1:9009)
+export OPENAI_API_KEY=sk-...
 uv run src/server.py
 ```
 
@@ -56,15 +66,19 @@ docker run -p 9009:9009 my-agent
 
 ## Testing
 
-Run A2A conformance tests against your agent.
-
 ```bash
-# Install test dependencies
 uv sync --extra test
 
-# Start your agent (uv or docker; see above)
+# Unit tests (mocked OpenAI; no agent process or API key)
+uv run pytest tests/test_agent.py -k tau2_agent -v
+```
 
-# Run tests against your running agent URL
+Run A2A conformance tests against a **running** agent:
+
+```bash
+export OPENAI_API_KEY=sk-...
+uv run src/server.py
+# other terminal:
 uv run pytest --agent-url http://localhost:9009
 ```
 

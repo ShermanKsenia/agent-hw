@@ -1,0 +1,36 @@
+---
+description: Python scripts — structure, style, docs, venv, and dependencies
+globs: **/*.py
+alwaysApply: false
+---
+
+# Python in this project
+
+## Layout
+
+- Keep the template layout: agent code under `src/` (`server.py`, `executor.py`, `agent.py`, `messenger.py`), tests under `tests/`. Do not introduce ad-hoc top-level script folders unless the README structure is updated too.
+- Prefer package-style imports consistent with how `src/` is run (e.g. `from executor import Executor` when the working directory / path matches the project).
+
+## Style and naming
+
+- Follow **PEP 8**: 4-space indent, sensible line length, imports grouped (stdlib, third party, local).
+- Names: `snake_case` for functions and variables, `PascalCase` for classes, module-level constants in `UPPER_SNAKE` when truly constant.
+- Comments: short and purposeful—explain *why* or non-obvious constraints, not what the code already says.
+
+## Documentation
+
+- Public functions, classes, and modules that others import should have up-to-date **docstrings** (Google or NumPy style—pick one and stay consistent).
+- When behavior, CLI flags, or env vars change, update **README.md** (run/test/publish sections) in the same change when it affects users.
+
+## Environment and dependencies
+
+- Use a **virtual environment** (this repo documents `uv sync`, which manages `.venv`). Do not assume system Python for installs.
+- Track runtime and optional deps in **`pyproject.toml`** (`[project]` / `[project.optional-dependencies]`). After adding or bumping versions, refresh the lockfile with `uv lock` (or `uv sync`) and commit **`uv.lock`** so installs are reproducible.
+
+```toml
+# Example: add a dependency
+dependencies = [
+    "a2a-sdk[http-server]>=0.3.20",
+    "some-package>=1.0.0",
+]
+```

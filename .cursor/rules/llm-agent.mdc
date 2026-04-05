@@ -1,0 +1,31 @@
+---
+description: LLM providers, secrets, and agent integration in src/
+globs: src/**/*.py
+alwaysApply: false
+---
+
+# LLM usage in this A2A agent
+
+## Configuration and secrets
+
+- **Never** hardcode API keys or tokens. Read from environment (e.g. `os.environ`, `pydantic-settings`) and document required variables in **README.md** (names only; no real values). Add keys to `.env` locally; keep `.env` out of git.
+- Centralize **model id**, **temperature**, **max tokens**, and **base URL** (if applicable) in one place (module-level constants, a small `settings` object, or env-backed config)—avoid scattering magic strings across `Agent.run`.
+
+## Dependencies
+
+- Declare the official client/SDK in **`pyproject.toml`**, then run **`uv lock`** / **`uv sync`** and commit **`uv.lock`**. Prefer maintained, async-capable clients when `Agent.run` stays async.
+
+## Integration with A2A (`Agent.run`)
+
+- Use **`TaskUpdater`**: call `update_status` / `add_artifact` so long-running LLM work surfaces progress (e.g. “Calling model…”) instead of blocking silently.
+- On failure, raise or propagate errors the **`Executor`** can turn into a failed task; avoid returning raw stack traces or provider error bodies as the only user-visible text—summarize safely, log details server-side if needed.
+
+## Robustness and safety
+
+- Set **timeouts** and **retries** where the SDK allows; handle rate limits and empty responses explicitly.
+- Treat model output as **untrusted** when used in tools, subprocesses, or downstream HTTP; validate or allowlist actions.
+- **Prompts**: keep system/developer prompts in versioned code or clearly named constants; when behavior depends on prompt wording, note that in docstrings or README.
+
+## Testing
+
+- **Unit tests** must not call live models by default: mock the client or inject a fake implementation so CI stays deterministic and free of secrets.
