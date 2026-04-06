@@ -3,12 +3,15 @@
   config_schema: {
     type: "object",
     properties: {
-      agent_llm: { type: "string" },
+      domain: { type: "string", default: "airline" },
+      num_tasks: { type: "integer", default: 2 },
+      user_llm: { type: "string", default: "qwen/qwen3.6-plus:free" },
+      agent_llm: { type: "string", default: "qwen/qwen3.6-plus:free" },
       openai_api_key: { type: "string", secret: true },
-      gemini_api_key: { type: "string", secret: true },
-      deepseek_api_key: { type: "string", secret: true },
+      gemini_api_key: { type: "string", secret: true, default: "" },
+      deepseek_api_key: { type: "string", secret: true, default: "" },
     },
-    required: ["agent_llm", "openai_api_key", "gemini_api_key", "deepseek_api_key"],
+    required: ["agent_llm", "openai_api_key"],
     additionalProperties: false,
   },
   slots: {
@@ -18,6 +21,9 @@
     image: "ghcr.io/shermanksenia/agent-hw:latest",
     entrypoint: ["uv", "run", "src/server.py", "--host", "0.0.0.0", "--port", "9009"],
     env: {
+      DOMAIN: "${config.domain}",
+      NUM_TASKS: "${config.num_tasks}",
+      USER_LLM: "${config.user_llm}",
       AGENT_LLM: "${config.agent_llm}",
       OPENAI_API_KEY: "${config.openai_api_key}",
       GEMINI_API_KEY: "${config.gemini_api_key}",
