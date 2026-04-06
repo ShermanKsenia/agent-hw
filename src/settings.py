@@ -3,7 +3,7 @@
 import os
 
 # LiteLLM OpenRouter ids use the `openrouter/` prefix (see LiteLLM OpenRouter docs).
-DEFAULT_MODEL = "openrouter/qwen/qwen3.6-plus:free"
+DEFAULT_MODEL = "openrouter/openai/gpt-4o-mini"
 
 # Fixed OpenRouter API base (do not use OPENAI_BASE_URL for switching providers).
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
