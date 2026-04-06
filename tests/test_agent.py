@@ -208,11 +208,9 @@ async def test_tau2_agent_openai_json_artifact():
     mock_response = MagicMock()
     mock_response.choices = [msg_obj]
 
-    mock_create = AsyncMock(return_value=mock_response)
-    mock_client = MagicMock()
-    mock_client.chat.completions.create = mock_create
+    mock_completion = AsyncMock(return_value=mock_response)
 
-    agent = Agent(client=mock_client)
+    agent = Agent(acompletion_fn=mock_completion)
     updater = MagicMock()
     updater.update_status = AsyncMock()
     updater.add_artifact = AsyncMock()
@@ -227,10 +225,11 @@ async def test_tau2_agent_openai_json_artifact():
 
     await agent.run(user_msg, updater)
 
-    mock_create.assert_awaited_once()
-    _args, kwargs = mock_create.await_args
-    assert kwargs["temperature"] == 0
-    assert kwargs["response_format"] == {"type": "json_object"}
+    mock_completion.assert_awaited_once()
+    first_msgs = mock_completion.await_args.args[0]
+    assert len(first_msgs) == 2
+    assert first_msgs[0]["role"] == "system"
+    assert first_msgs[1]["content"] == "Hello"
     assert len(agent._messages) == 3
 
     updater.add_artifact.assert_awaited_once()
@@ -249,16 +248,14 @@ async def test_tau2_agent_accumulates_history_across_turns():
         resp.choices = [msg_obj]
         return resp
 
-    mock_create = AsyncMock(
+    mock_completion = AsyncMock(
         side_effect=[
             make_response('{"name": "respond", "arguments": {"content": "a"}}'),
             make_response('{"name": "respond", "arguments": {"content": "b"}}'),
         ]
     )
-    mock_client = MagicMock()
-    mock_client.chat.completions.create = mock_create
 
-    agent = Agent(client=mock_client)
+    agent = Agent(acompletion_fn=mock_completion)
     updater = MagicMock()
     updater.update_status = AsyncMock()
     updater.add_artifact = AsyncMock()
@@ -284,8 +281,8 @@ async def test_tau2_agent_accumulates_history_across_turns():
         updater,
     )
 
-    assert mock_create.await_count == 2
-    second_msgs = mock_create.await_args_list[1].kwargs["messages"]
+    assert mock_completion.await_count == 2
+    second_msgs = mock_completion.await_args_list[1].args[0]
     assert any("First" in m.get("content", "") for m in second_msgs)
     assert any(
         '{"name": "respond", "arguments": {"content": "a"}}' == m.get("content", "")
