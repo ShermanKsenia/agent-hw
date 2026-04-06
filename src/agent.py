@@ -18,19 +18,21 @@ class Agent:
     """Tau2 purple baseline: OpenAI chat with JSON output, history per A2A context."""
 
     def __init__(self, client: AsyncOpenAI | None = None):
+        self._client_override = client
         self._messages: list[dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
         ]
         self.model = settings.get_openai_model()
-        print(f"Using model: {self.model}")
-        print(f"Using base url: {settings.get_openai_base_url()}")
+        self.base_url = "https://openrouter.ai/api/v1"
 
     def _client(self) -> AsyncOpenAI:
+        if self._client_override is not None:
+            return self._client_override
         api_key = settings.get_openai_api_key()
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is not set")
-        kwargs: dict = {"api_key": api_key}
-        kwargs["base_url"] = "https://openrouter.ai/api/v1"
+        kwargs: dict[str, str] = {"api_key": api_key}
+        kwargs["base_url"] = self.base_url 
         return AsyncOpenAI(**kwargs)
 
     async def run(self, message: Message, updater: TaskUpdater) -> None:
