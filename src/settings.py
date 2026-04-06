@@ -10,7 +10,7 @@ OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 
 
 def get_openai_api_key() -> str:
-    return (os.environ.get("OPENAI_API_KEY") or "").strip()
+    return (os.environ.get("OPENROUTER_API_KEY") or "").strip()
 
 
 def get_openai_model() -> str:
