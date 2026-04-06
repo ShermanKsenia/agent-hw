@@ -1,15 +1,18 @@
+import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import httpx
 import pytest
-from uuid import uuid4
 
 from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
 from a2a.types import Message, Part, Role, TextPart
 
 from agent import Agent
 
+# Non-streaming A2A waits for the full response (LLM + task completion). 10s often times out in CI.
+_A2A_HTTP_TIMEOUT = float(os.environ.get("A2A_TEST_HTTP_TIMEOUT", "60"))
 
 # A2A validation helpers - adapted from https://github.com/a2aproject/a2a-inspector/blob/main/backend/validators.py
 
@@ -142,7 +145,7 @@ def validate_event(data: dict[str, Any]) -> list[str]:
 # A2A messaging helpers
 
 async def send_text_message(text: str, url: str, context_id: str | None = None, streaming: bool = False):
-    async with httpx.AsyncClient(timeout=10) as httpx_client:
+    async with httpx.AsyncClient(timeout=_A2A_HTTP_TIMEOUT) as httpx_client:
         resolver = A2ACardResolver(httpx_client=httpx_client, base_url=url)
         agent_card = await resolver.get_agent_card()
         config = ClientConfig(httpx_client=httpx_client, streaming=streaming)
