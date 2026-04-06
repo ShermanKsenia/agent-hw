@@ -1,15 +1,18 @@
+import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import httpx
 import pytest
-from uuid import uuid4
 
 from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
 from a2a.types import Message, Part, Role, TextPart
 
 from agent import Agent
 
+# Non-streaming A2A waits for the full response (LLM + task completion). 10s often times out in CI.
+_A2A_HTTP_TIMEOUT = float(os.environ.get("A2A_TEST_HTTP_TIMEOUT", "60"))
 
 # A2A validation helpers - adapted from https://github.com/a2aproject/a2a-inspector/blob/main/backend/validators.py
 
@@ -142,7 +145,7 @@ def validate_event(data: dict[str, Any]) -> list[str]:
 # A2A messaging helpers
 
 async def send_text_message(text: str, url: str, context_id: str | None = None, streaming: bool = False):
-    async with httpx.AsyncClient(timeout=10) as httpx_client:
+    async with httpx.AsyncClient(timeout=_A2A_HTTP_TIMEOUT) as httpx_client:
         resolver = A2ACardResolver(httpx_client=httpx_client, base_url=url)
         agent_card = await resolver.get_agent_card()
         config = ClientConfig(httpx_client=httpx_client, streaming=streaming)
@@ -208,11 +211,9 @@ async def test_tau2_agent_openai_json_artifact():
     mock_response = MagicMock()
     mock_response.choices = [msg_obj]
 
-    mock_create = AsyncMock(return_value=mock_response)
-    mock_client = MagicMock()
-    mock_client.chat.completions.create = mock_create
+    mock_completion = AsyncMock(return_value=mock_response)
 
-    agent = Agent(client=mock_client)
+    agent = Agent(acompletion_fn=mock_completion)
     updater = MagicMock()
     updater.update_status = AsyncMock()
     updater.add_artifact = AsyncMock()
@@ -227,10 +228,11 @@ async def test_tau2_agent_openai_json_artifact():
 
     await agent.run(user_msg, updater)
 
-    mock_create.assert_awaited_once()
-    _args, kwargs = mock_create.await_args
-    assert kwargs["temperature"] == 0
-    assert kwargs["response_format"] == {"type": "json_object"}
+    mock_completion.assert_awaited_once()
+    first_msgs = mock_completion.await_args.args[0]
+    assert len(first_msgs) == 2
+    assert first_msgs[0]["role"] == "system"
+    assert first_msgs[1]["content"] == "Hello"
     assert len(agent._messages) == 3
 
     updater.add_artifact.assert_awaited_once()
@@ -249,16 +251,14 @@ async def test_tau2_agent_accumulates_history_across_turns():
         resp.choices = [msg_obj]
         return resp
 
-    mock_create = AsyncMock(
+    mock_completion = AsyncMock(
         side_effect=[
             make_response('{"name": "respond", "arguments": {"content": "a"}}'),
             make_response('{"name": "respond", "arguments": {"content": "b"}}'),
         ]
     )
-    mock_client = MagicMock()
-    mock_client.chat.completions.create = mock_create
 
-    agent = Agent(client=mock_client)
+    agent = Agent(acompletion_fn=mock_completion)
     updater = MagicMock()
     updater.update_status = AsyncMock()
     updater.add_artifact = AsyncMock()
@@ -284,8 +284,8 @@ async def test_tau2_agent_accumulates_history_across_turns():
         updater,
     )
 
-    assert mock_create.await_count == 2
-    second_msgs = mock_create.await_args_list[1].kwargs["messages"]
+    assert mock_completion.await_count == 2
+    second_msgs = mock_completion.await_args_list[1].args[0]
     assert any("First" in m.get("content", "") for m in second_msgs)
     assert any(
         '{"name": "respond", "arguments": {"content": "a"}}' == m.get("content", "")

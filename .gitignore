@@ -12,3 +12,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Some files
+test_agent_behavior_demo.py
+test_agent_integration_live.py
+
