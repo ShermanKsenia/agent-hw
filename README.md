@@ -39,6 +39,7 @@ For a concrete example of implementing an agent using this template, see this [d
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `AGENT_RULES_REMINDER_MESSAGE_THRESHOLD` | no | when stored message count reaches this value, append a short rules recap to reasoning/JSON/repair LLM calls only (default `12`; `0` disables) |
 | `AGENT_LLM` | yes | agent model name |
 | `OPENAI_API_KEY` | no | api key to openai |
 | `GEMINI_API_KEY` | no | api key to gemini |

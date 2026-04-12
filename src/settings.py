@@ -72,6 +72,11 @@ def get_max_completion_tokens() -> int:
     return int(os.environ.get("AGENT_MAX_TOKENS", "2048"))
 
 
+def get_agent_rules_reminder_message_threshold() -> int:
+    """When len(agent._messages) >= this value, reasoning/JSON/repair LLM calls include an extra ephemeral user recap. 0 disables."""
+    return int(os.environ.get("AGENT_RULES_REMINDER_MESSAGE_THRESHOLD", "12"))
+
+
 def agent_debug_logging() -> bool:
     return (os.environ.get("AGENT_DEBUG") or "").strip().lower() in (
         "1",
