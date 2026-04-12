@@ -1,12 +1,44 @@
 """Environment-backed settings for the Tau2 purple baseline agent."""
 
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 # LiteLLM OpenRouter ids use the `openrouter/` prefix (see LiteLLM OpenRouter docs).
 DEFAULT_MODEL = "openrouter/openai/gpt-4o-mini"
 
 # Fixed OpenRouter API base (do not use OPENAI_BASE_URL for switching providers).
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+
+DOMAIN_AIRLINE = "airline"
+DOMAIN_RETAIL = "retail"
+DOMAIN_TELECOM = "telecom"
+VALID_DOMAINS = frozenset({DOMAIN_AIRLINE, DOMAIN_RETAIL, DOMAIN_TELECOM})
+DEFAULT_DOMAIN = DOMAIN_AIRLINE
+
+
+def _normalize_domain_raw(raw: str) -> str:
+    s = raw.strip().lower()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "'\"":
+        s = s[1:-1].strip().lower()
+    return s
+
+
+def get_domain() -> str:
+    """Customer-service vertical from DOMAIN env: airline, retail, or telecom."""
+    raw_env = (os.environ.get("DOMAIN") or "").strip()
+    raw = _normalize_domain_raw(raw_env)
+    if raw in VALID_DOMAINS:
+        return raw
+    if raw_env:
+        logger.warning(
+            "Invalid DOMAIN=%r (expected one of %s); using %r",
+            raw_env,
+            ", ".join(sorted(VALID_DOMAINS)),
+            DEFAULT_DOMAIN,
+        )
+    return DEFAULT_DOMAIN
 
 
 def get_openai_api_key() -> str:

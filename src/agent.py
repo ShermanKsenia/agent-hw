@@ -32,25 +32,85 @@ RETRYABLE_EXCEPTIONS = (
     APIConnectionError,
 )
 
-SYSTEM_PROMPT = """You are a customer service agent. Domain policy, tool definitions, and scenario details appear in the user messages—follow those sources as the authority for what you may do or say.
+_SYSTEM_PROMPT_AIRLINE = """You are a customer service agent for an airline. Help passengers with bookings and itinerary changes, check-in and boarding, baggage (lost, damaged, allowances), flight delays and cancellations, loyalty programs, and special assistance needs. Prioritize time-sensitive travel problems, be precise about fare rules and rebooking options, and remain calm and professional when customers are stressed.
 
-Output contract (required):
-- Reply with exactly one JSON object and nothing else. No markdown fences, no commentary before or after the JSON.
-- The object must have keys "name" (string) and "arguments" (JSON object). This must be parseable by a standard JSON parser.
+Prioritize time-critical travel issues (e.g., same-day flights, missed connections) and proactively offer rebooking options based on fare rules and availability. Clearly explain restrictions (change fees, fare classes, standby rules) and set accurate expectations.
 
-Tool versus respond:
-- Use "name": "respond" with arguments.content only when sending a direct message to the user.
-- For anything that requires database or environment state, call a tool by using its exact name from the tool list in the current user message. Use at most one tool per turn; wait for tool results in subsequent messages before your next action.
+Handle stressed or urgent travelers with calm, reassuring communication. When applicable, provide next steps such as compensation policies, vouchers, or escalation to airport staff. Always aim to minimize travel disruption and keep the passenger moving."""
 
-Using tool results:
-- Lines like Tool '...' result: ... are ground truth. Do not contradict them or invent facts they do not support.
+_SYSTEM_PROMPT_RETAIL = """You are a customer service agent for a retail and e-commerce business. Assist customers with product discovery, detailed product information, availability, orders and order status, shipping and delivery options, returns and exchanges, refunds, promotions, and account or checkout issues.
+
+Help customers make confident purchase decisions by clarifying product details, comparing options, and addressing concerns. Balance empathy with clear enforcement of return, refund, and promotion policies.
+
+Focus on fast, frictionless resolution while maintaining a positive shopping experience. When issues arise (e.g., delayed shipments or damaged items), offer practical solutions such as replacements, refunds, or store credit, following company policy."""
+
+_SYSTEM_PROMPT_TELECOM = """You are a customer service agent for a telecommunications provider. Support customers with mobile, broadband, and TV services, including plan selection, billing and usage questions, network coverage and outages, device setup, and technical troubleshooting.
+
+Guide users through step-by-step diagnostics in clear, simple language, adapting to their technical level. Identify whether issues are device-related, account-related, or network-related, and take appropriate action.
+
+Handle sensitive account actions (e.g., SIM swaps, plan changes, security updates) with proper verification. Escalate to technical teams or field service when issues cannot be resolved remotely. Aim to restore service quickly while ensuring customer confidence and security."""
+
+_SYSTEM_PROMPT_SHARED = """Domain policies, tool definitions, and scenario details are provided in user messages—treat them as the source of truth.
+
+Output contract (strict):
+- Respond with exactly one JSON object. No extra text.
+- The object must include:
+  - "name": string
+  - "arguments": object
+- Must be valid JSON with no markdown or commentary.
+
+Tool vs respond:
+- Use "name": "respond" with arguments.content for direct user replies.
+- Use a tool only when required to access or modify system state.
+- Call at most one tool per turn and wait for results before proceeding.
+
+Tool results:
+- Any "Tool '...' result: ..." is authoritative. Do not contradict or extend beyond it.
 
 Arguments:
-- Pass only parameters defined in the tool schema; use the types required (strings, numbers, booleans); include all required fields.
+- Use only defined parameters from the tool schema.
+- Include all required fields with correct types.
 
-If policy in the messages requires escalation, refusal, or transfer, follow that policy. When unsure whether you have enough information, prefer reading state via a tool over guessing.
+Behavior:
+- Follow escalation, refusal, and transfer policies when specified.
+- If information is missing, prefer calling a tool instead of guessing.
+- Keep responses concise, clear, and solution-oriented unless detail is required."""
 
-Keep user-facing respond text clear and concise unless the situation requires more detail."""
+_DOMAIN_SYSTEM_PROMPTS: dict[str, str] = {
+    settings.DOMAIN_AIRLINE: _SYSTEM_PROMPT_AIRLINE,
+    settings.DOMAIN_RETAIL: _SYSTEM_PROMPT_RETAIL,
+    settings.DOMAIN_TELECOM: _SYSTEM_PROMPT_TELECOM,
+}
+
+_REASONING_INSTRUCTIONS = """You are performing an internal analysis step before the domain-specific assistant responds.
+
+Do not produce JSON, tool calls, or any formatted output. Write in plain prose only.
+
+Briefly analyze the conversation by covering:
+- The customer’s main request and any secondary needs
+- Relevant context (e.g., prior messages, time sensitivity, sentiment)
+- Missing or unclear information required to proceed
+- Which domain (airline, retail, telecom, or unknown) and what type of scenario this falls under
+- Whether policies, constraints, or tools are likely needed
+
+Conclude with the most appropriate next step (direct reply, ask clarification, or tool call).
+
+Keep the analysis concise and focused, using no more than 5–7 short sentences."""
+
+
+def domain_role_intro(domain: str) -> str:
+    """Domain-specific role text (shared by JSON system prompt and reasoning system prompt)."""
+    return _DOMAIN_SYSTEM_PROMPTS.get(domain, _SYSTEM_PROMPT_AIRLINE)
+
+
+def reasoning_system_for_domain(domain: str) -> str:
+    """System message for the plain-text reasoning pass (no Tau2 JSON contract)."""
+    return f"{domain_role_intro(domain)}\n\n{_REASONING_INSTRUCTIONS}"
+
+
+def system_prompt_for_domain(domain: str) -> str:
+    """Full system message: domain-specific role plus shared Tau2 JSON/tool rules."""
+    return f"{domain_role_intro(domain)}\n\n{_SYSTEM_PROMPT_SHARED}"
 
 JSON_REPAIR_USER = (
     "Your previous reply was not valid JSON or did not match the required shape "
@@ -68,6 +128,8 @@ FALLBACK_RESPOND_JSON = json.dumps(
 )
 
 ACompletionFn = Callable[..., Awaitable[Any]]
+
+TAU2_JSON_RESPONSE_FORMAT: dict[str, str] = {"type": "json_object"}
 
 
 def _strip_markdown_fences(text: str) -> str:
@@ -144,8 +206,9 @@ class Agent:
         acompletion_fn: ACompletionFn | None = None,
     ):
         self._acompletion_fn: ACompletionFn | None = acompletion_fn
+        self._domain = settings.get_domain()
         self._messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt_for_domain(self._domain)},
         ]
         self.model = settings.litellm_model_for_openrouter(settings.get_openai_model())
         self.api_key = settings.get_openai_api_key()
@@ -153,23 +216,34 @@ class Agent:
         self.backoff_base = settings.get_agent_llm_backoff_base()
         self.max_tokens = settings.get_max_completion_tokens()
 
-    async def _litellm_acompletion(self, messages: list[dict[str, Any]]) -> Any:
+    async def _litellm_acompletion(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        response_format: dict[str, Any] | None,
+    ) -> Any:
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "api_base": OPENROUTER_API_BASE,
             "temperature": 1.0,
             "reasoning_effort": "high",
-            "response_format": {"type": "json_object"},
             "max_tokens": self.max_tokens,
             # OpenRouter / many models ignore reasoning_effort; LiteLLM errors unless dropped.
             "drop_params": True,
         }
+        if response_format is not None:
+            kwargs["response_format"] = response_format
         if self.api_key:
             kwargs["api_key"] = self.api_key
         return await acompletion(**kwargs)
 
-    async def _call_llm_with_retry(self, messages: list[dict[str, Any]]) -> Any:
+    async def _call_llm_with_retry(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        response_format: dict[str, Any] | None,
+    ) -> Any:
         # Snapshot list so callers (e.g. tests) do not see later appends to self._messages.
         msgs = list(messages)
 
@@ -179,7 +253,9 @@ class Agent:
         last_exc: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                resp = await self._litellm_acompletion(msgs)
+                resp = await self._litellm_acompletion(
+                    msgs, response_format=response_format
+                )
                 if attempt > 1:
                     logger.info("LLM call succeeded on attempt %s", attempt)
                 return resp
@@ -200,11 +276,34 @@ class Agent:
         assert last_exc is not None
         raise last_exc
 
-    async def _generate_json_output(self) -> str:
+    async def _generate_json_output(self, updater: TaskUpdater | None = None) -> str:
         if not self.api_key and self._acompletion_fn is None:
             raise RuntimeError("OPENAI_API_KEY is not set")
 
-        response = await self._call_llm_with_retry(self._messages)
+        reasoning_messages: list[dict[str, Any]] = [
+            {"role": "system", "content": reasoning_system_for_domain(self._domain)},
+            *self._messages[1:],
+        ]
+        reasoning_resp = await self._call_llm_with_retry(
+            reasoning_messages,
+            response_format=None,
+        )
+        reasoning_text = (reasoning_resp.choices[0].message.content or "").strip()
+        if settings.agent_debug_logging():
+            logger.info("LLM reasoning (truncated): %s...", reasoning_text[:500])
+
+        self._messages.append({"role": "assistant", "content": reasoning_text})
+
+        if updater is not None:
+            await updater.update_status(
+                TaskState.working,
+                new_agent_text_message("Generating response…"),
+            )
+
+        response = await self._call_llm_with_retry(
+            self._messages,
+            response_format=TAU2_JSON_RESPONSE_FORMAT,
+        )
         raw = (response.choices[0].message.content or "").strip()
 
         if settings.agent_debug_logging():
@@ -218,7 +317,10 @@ class Agent:
         self._messages.append({"role": "user", "content": JSON_REPAIR_USER})
 
         try:
-            response2 = await self._call_llm_with_retry(self._messages)
+            response2 = await self._call_llm_with_retry(
+                self._messages,
+                response_format=TAU2_JSON_RESPONSE_FORMAT,
+            )
         except Exception:
             self._messages.pop()
             self._messages.pop()
@@ -242,13 +344,13 @@ class Agent:
         input_text = get_message_text(message)
         await updater.update_status(
             TaskState.working,
-            new_agent_text_message("Calling model…"),
+            new_agent_text_message("Reasoning…"),
         )
 
         self._messages.append({"role": "user", "content": input_text})
 
         try:
-            assistant_content = await self._generate_json_output()
+            assistant_content = await self._generate_json_output(updater)
         except Exception as e:
             print("LLM call failed: %s: %s", type(e).__name__, e)
             print("Full traceback:")
