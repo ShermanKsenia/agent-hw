@@ -206,12 +206,18 @@ async def test_message(agent, streaming):
 @pytest.mark.asyncio
 async def test_tau2_agent_openai_json_artifact():
     json_out = '{"name": "respond", "arguments": {"content": "ok"}}'
-    msg_obj = MagicMock()
-    msg_obj.message.content = json_out
-    mock_response = MagicMock()
-    mock_response.choices = [msg_obj]
+    reasoning_text = "The user greeted me; I should respond politely."
 
-    mock_completion = AsyncMock(return_value=mock_response)
+    def make_response(content: str):
+        msg_obj = MagicMock()
+        msg_obj.message.content = content
+        resp = MagicMock()
+        resp.choices = [msg_obj]
+        return resp
+
+    mock_completion = AsyncMock(
+        side_effect=[make_response(reasoning_text), make_response(json_out)]
+    )
 
     agent = Agent(acompletion_fn=mock_completion)
     updater = MagicMock()
@@ -228,12 +234,18 @@ async def test_tau2_agent_openai_json_artifact():
 
     await agent.run(user_msg, updater)
 
-    mock_completion.assert_awaited_once()
-    first_msgs = mock_completion.await_args.args[0]
+    assert mock_completion.await_count == 2
+    first_msgs = mock_completion.await_args_list[0].args[0]
     assert len(first_msgs) == 2
     assert first_msgs[0]["role"] == "system"
+    assert "internal analysis" in first_msgs[0]["content"].lower()
     assert first_msgs[1]["content"] == "Hello"
-    assert len(agent._messages) == 3
+    second_msgs = mock_completion.await_args_list[1].args[0]
+    assert second_msgs[0]["role"] == "system"
+    assert second_msgs[1]["content"] == "Hello"
+    assert second_msgs[2]["role"] == "assistant"
+    assert second_msgs[2]["content"] == reasoning_text
+    assert len(agent._messages) == 4
 
     updater.add_artifact.assert_awaited_once()
     call_kw = updater.add_artifact.await_args.kwargs
@@ -253,7 +265,9 @@ async def test_tau2_agent_accumulates_history_across_turns():
 
     mock_completion = AsyncMock(
         side_effect=[
+            make_response("Reasoning for first turn."),
             make_response('{"name": "respond", "arguments": {"content": "a"}}'),
+            make_response("Reasoning for second turn."),
             make_response('{"name": "respond", "arguments": {"content": "b"}}'),
         ]
     )
@@ -284,10 +298,10 @@ async def test_tau2_agent_accumulates_history_across_turns():
         updater,
     )
 
-    assert mock_completion.await_count == 2
-    second_msgs = mock_completion.await_args_list[1].args[0]
-    assert any("First" in m.get("content", "") for m in second_msgs)
+    assert mock_completion.await_count == 4
+    second_turn_json_msgs = mock_completion.await_args_list[3].args[0]
+    assert any("First" in m.get("content", "") for m in second_turn_json_msgs)
     assert any(
         '{"name": "respond", "arguments": {"content": "a"}}' == m.get("content", "")
-        for m in second_msgs
+        for m in second_turn_json_msgs
     )
