@@ -131,6 +131,14 @@ ACompletionFn = Callable[..., Awaitable[Any]]
 
 TAU2_JSON_RESPONSE_FORMAT: dict[str, str] = {"type": "json_object"}
 
+# Ephemeral user message appended to LLM calls only (not stored in _messages) when history is long.
+_EPHEMERAL_RULES_REMINDER_USER = """[Rules reminder]
+- Output (JSON pass): exactly one JSON object with string "name" and object "arguments"; no markdown or extra text.
+- Use "name": "respond" and arguments.content for direct replies; use a tool only when needed for state.
+- At most one tool per turn; wait for tool results before continuing.
+- Lines like Tool '...' result: ... are authoritative—do not contradict them.
+- Use only parameters defined in the tool schema, with correct types."""
+
 
 def _strip_markdown_fences(text: str) -> str:
     s = text.strip()
@@ -215,6 +223,20 @@ class Agent:
         self.max_retries = settings.get_agent_llm_max_retries()
         self.backoff_base = settings.get_agent_llm_backoff_base()
         self.max_tokens = settings.get_max_completion_tokens()
+        self._rules_reminder_message_threshold = (
+            settings.get_agent_rules_reminder_message_threshold()
+        )
+
+    def _llm_messages_with_rules_reminder(
+        self, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Copy of ``messages`` plus a short rules recap when ``_messages`` is long; never mutates ``_messages``."""
+        out = list(messages)
+        th = self._rules_reminder_message_threshold
+        if th <= 0 or len(self._messages) < th:
+            return out
+        out.append({"role": "user", "content": _EPHEMERAL_RULES_REMINDER_USER})
+        return out
 
     async def _litellm_acompletion(
         self,
@@ -285,7 +307,7 @@ class Agent:
             *self._messages[1:],
         ]
         reasoning_resp = await self._call_llm_with_retry(
-            reasoning_messages,
+            self._llm_messages_with_rules_reminder(reasoning_messages),
             response_format=None,
         )
         reasoning_text = (reasoning_resp.choices[0].message.content or "").strip()
@@ -301,7 +323,7 @@ class Agent:
             )
 
         response = await self._call_llm_with_retry(
-            self._messages,
+            self._llm_messages_with_rules_reminder(self._messages),
             response_format=TAU2_JSON_RESPONSE_FORMAT,
         )
         raw = (response.choices[0].message.content or "").strip()
@@ -318,7 +340,7 @@ class Agent:
 
         try:
             response2 = await self._call_llm_with_retry(
-                self._messages,
+                self._llm_messages_with_rules_reminder(self._messages),
                 response_format=TAU2_JSON_RESPONSE_FORMAT,
             )
         except Exception:

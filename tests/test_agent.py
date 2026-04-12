@@ -305,3 +305,93 @@ async def test_tau2_agent_accumulates_history_across_turns():
         '{"name": "respond", "arguments": {"content": "a"}}' == m.get("content", "")
         for m in second_turn_json_msgs
     )
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_rules_reminder_appended_when_threshold_met(monkeypatch):
+    """Reminder is added to LLM payloads only, not persisted in _messages."""
+    monkeypatch.setenv("AGENT_RULES_REMINDER_MESSAGE_THRESHOLD", "2")
+
+    def make_response(content: str):
+        msg_obj = MagicMock()
+        msg_obj.message.content = content
+        resp = MagicMock()
+        resp.choices = [msg_obj]
+        return resp
+
+    json_out = '{"name": "respond", "arguments": {"content": "ok"}}'
+    reasoning_text = "Thinking."
+    mock_completion = AsyncMock(
+        side_effect=[make_response(reasoning_text), make_response(json_out)]
+    )
+
+    agent = Agent(acompletion_fn=mock_completion)
+    updater = MagicMock()
+    updater.update_status = AsyncMock()
+    updater.add_artifact = AsyncMock()
+
+    await agent.run(
+        Message(
+            kind="message",
+            role=Role.user,
+            parts=[Part(TextPart(text="Hi"))],
+            message_id="m1",
+            context_id=None,
+        ),
+        updater,
+    )
+
+    first_msgs = mock_completion.await_args_list[0].args[0]
+    assert first_msgs[-1]["role"] == "user"
+    assert "[Rules reminder]" in first_msgs[-1]["content"]
+
+    second_msgs = mock_completion.await_args_list[1].args[0]
+    assert second_msgs[-1]["role"] == "user"
+    assert "[Rules reminder]" in second_msgs[-1]["content"]
+
+    assert not any(
+        isinstance(m.get("content"), str) and "[Rules reminder]" in m["content"]
+        for m in agent._messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_rules_reminder_on_json_repair_call(monkeypatch):
+    monkeypatch.setenv("AGENT_RULES_REMINDER_MESSAGE_THRESHOLD", "2")
+
+    def make_response(content: str):
+        msg_obj = MagicMock()
+        msg_obj.message.content = content
+        resp = MagicMock()
+        resp.choices = [msg_obj]
+        return resp
+
+    fixed = '{"name": "respond", "arguments": {"content": "fixed"}}'
+    mock_completion = AsyncMock(
+        side_effect=[
+            make_response("Reasoning."),
+            make_response("not json"),
+            make_response(fixed),
+        ]
+    )
+
+    agent = Agent(acompletion_fn=mock_completion)
+    updater = MagicMock()
+    updater.update_status = AsyncMock()
+    updater.add_artifact = AsyncMock()
+
+    await agent.run(
+        Message(
+            kind="message",
+            role=Role.user,
+            parts=[Part(TextPart(text="Hi"))],
+            message_id="m1",
+            context_id=None,
+        ),
+        updater,
+    )
+
+    assert mock_completion.await_count == 3
+    repair_msgs = mock_completion.await_args_list[2].args[0]
+    assert repair_msgs[-1]["role"] == "user"
+    assert "[Rules reminder]" in repair_msgs[-1]["content"]
